@@ -523,10 +523,11 @@
     // 地図の初期化
     const map = L.map('map').setView([35.1804, 136.9065], 10);
 
-    // OpenStreetMapタイルレイヤーの追加（標準的な地図）
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-        maxZoom: 19
+    // Stamenの地形図タイル（CDN経由で安定）
+    L.tileLayer('https://stamen-tiles-{s}.a.ssl.fastly.net/terrain/{z}/{x}/{y}.png', {
+        attribution: 'Map tiles by <a href="http://stamen.com">Stamen Design</a>, under <a href="http://creativecommons.org/licenses/by/3.0">CC BY 3.0</a>. Data by <a href="http://openstreetmap.org">OpenStreetMap</a>',
+        subdomains: 'abcd',
+        maxZoom: 18
     }).addTo(map);
 
     // カラースケールの定義
