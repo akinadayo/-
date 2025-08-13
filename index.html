@@ -270,11 +270,175 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 
 <script>
-    // グローバル変数
-    let map;
-    let heatLayer;
-    let markerLayer;
-    let allData = [];
+    // 市区町村コードから座標を取得するマッピング（主要都市）
+    const cityCodeToCoordinates = {
+        // 北海道
+        '0110001': {lat: 43.0642, lng: 141.3469, name: '札幌市中央区'},
+        '0110002': {lat: 43.0748, lng: 141.3408, name: '札幌市北区'},
+        '0110003': {lat: 43.0982, lng: 141.3847, name: '札幌市東区'},
+        '0110004': {lat: 43.0548, lng: 141.3196, name: '札幌市西区'},
+        '0120001': {lat: 41.7743, lng: 140.7370, name: '函館市'},
+        '0120401': {lat: 42.9849, lng: 144.3820, name: '釧路市'},
+        
+        // 宮城県
+        '0410001': {lat: 38.2682, lng: 140.8694, name: '仙台市青葉区'},
+        '0410002': {lat: 38.2488, lng: 140.8828, name: '仙台市若林区'},
+        '0410003': {lat: 38.2613, lng: 140.9826, name: '仙台市宮城野区'},
+        
+        // 東京都
+        '1310101': {lat: 35.6762, lng: 139.6503, name: '千代田区'},
+        '1310102': {lat: 35.6595, lng: 139.7005, name: '港区'},
+        '1310103': {lat: 35.6938, lng: 139.7034, name: '新宿区'},
+        '1310104': {lat: 35.7295, lng: 139.7109, name: '文京区'},
+        '1310105': {lat: 35.6850, lng: 139.7746, name: '台東区'},
+        '1310106': {lat: 35.6828, lng: 139.7746, name: '墨田区'},
+        '1310107': {lat: 35.6850, lng: 139.8090, name: '江東区'},
+        '1310108': {lat: 35.6923, lng: 139.6952, name: '品川区'},
+        '1310109': {lat: 35.6531, lng: 139.6557, name: '目黒区'},
+        '1310110': {lat: 35.6338, lng: 139.7163, name: '大田区'},
+        '1310111': {lat: 35.6090, lng: 139.6680, name: '世田谷区'},
+        '1310112': {lat: 35.6640, lng: 139.6982, name: '渋谷区'},
+        '1310113': {lat: 35.7023, lng: 139.5603, name: '中野区'},
+        '1310114': {lat: 35.7023, lng: 139.5803, name: '杉並区'},
+        '1310115': {lat: 35.7539, lng: 139.6910, name: '豊島区'},
+        '1310116': {lat: 35.7320, lng: 139.7390, name: '北区'},
+        '1310117': {lat: 35.7477, lng: 139.7638, name: '荒川区'},
+        '1310118': {lat: 35.7338, lng: 139.6566, name: '板橋区'},
+        '1310119': {lat: 35.7509, lng: 139.6566, name: '練馬区'},
+        '1310120': {lat: 35.7472, lng: 139.8089, name: '足立区'},
+        '1310121': {lat: 35.7339, lng: 139.8608, name: '葛飾区'},
+        '1310122': {lat: 35.6065, lng: 139.8352, name: '江戸川区'},
+        
+        // 神奈川県
+        '1410001': {lat: 35.4437, lng: 139.6380, name: '横浜市中区'},
+        '1410002': {lat: 35.4657, lng: 139.6222, name: '横浜市西区'},
+        '1410003': {lat: 35.5111, lng: 139.6361, name: '横浜市港北区'},
+        '1410004': {lat: 35.5532, lng: 139.5459, name: '横浜市青葉区'},
+        '1413001': {lat: 35.5307, lng: 139.7029, name: '川崎市川崎区'},
+        '1413002': {lat: 35.5876, lng: 139.6486, name: '川崎市中原区'},
+        
+        // 愛知県
+        '2310001': {lat: 35.1815, lng: 136.9066, name: '名古屋市中区'},
+        '2310002': {lat: 35.1709, lng: 136.8815, name: '名古屋市昭和区'},
+        '2310003': {lat: 35.1628, lng: 136.9355, name: '名古屋市千種区'},
+        '2310004': {lat: 35.2070, lng: 136.9720, name: '名東区'},
+        '2310005': {lat: 35.1765, lng: 137.0027, name: '天白区'},
+        '2310006': {lat: 35.1412, lng: 136.9065, name: '瑞穂区'},
+        '2310007': {lat: 35.1944, lng: 136.8815, name: '西区'},
+        '2310008': {lat: 35.2045, lng: 136.9163, name: '北区'},
+        '2310009': {lat: 35.1333, lng: 136.8745, name: '港区'},
+        '2310010': {lat: 35.1240, lng: 136.9376, name: '南区'},
+        '2310011': {lat: 35.1390, lng: 136.9630, name: '緑区'},
+        '2310012': {lat: 35.1843, lng: 136.9465, name: '東区'},
+        '2310013': {lat: 35.2289, lng: 136.8397, name: '中村区'},
+        '2310014': {lat: 35.1676, lng: 136.8527, name: '中川区'},
+        '2310015': {lat: 35.1269, lng: 136.8086, name: '熱田区'},
+        '2310016': {lat: 35.2392, lng: 137.0474, name: '守山区'},
+        
+        // 大阪府
+        '2710001': {lat: 34.6937, lng: 135.5023, name: '大阪市北区'},
+        '2710002': {lat: 34.6784, lng: 135.5019, name: '大阪市中央区'},
+        '2710003': {lat: 34.6617, lng: 135.5196, name: '大阪市浪速区'},
+        '2710004': {lat: 34.6605, lng: 135.5011, name: '大阪市西成区'},
+        '2710005': {lat: 34.7324, lng: 135.5003, name: '大阪市淀川区'},
+        '2710006': {lat: 34.6413, lng: 135.5629, name: '大阪市天王寺区'},
+        
+        // 京都府
+        '2610001': {lat: 35.0116, lng: 135.7681, name: '京都市中京区'},
+        '2610002': {lat: 35.0394, lng: 135.7292, name: '京都市左京区'},
+        '2610003': {lat: 35.0295, lng: 135.7595, name: '京都市上京区'},
+        '2610004': {lat: 34.9877, lng: 135.7555, name: '京都市下京区'},
+        
+        // 兵庫県
+        '2810001': {lat: 34.6901, lng: 135.1955, name: '神戸市中央区'},
+        '2810002': {lat: 34.7202, lng: 135.2345, name: '神戸市東灘区'},
+        
+        // 福岡県
+        '4010001': {lat: 33.5904, lng: 130.4017, name: '福岡市中央区'},
+        '4010002': {lat: 33.5833, lng: 130.3577, name: '福岡市早良区'},
+        '4010003': {lat: 33.6195, lng: 130.4246, name: '福岡市博多区'},
+        
+        // 大分県の追加（提供されたデータに基づく）
+        '4414391': {lat: 33.2792, lng: 131.5000, name: '別府市'}
+    };
+    
+    // city_codeから座標を取得または推定する関数
+    function getCoordinatesFromCityCode(cityCode, prefectureName, cityName) {
+        // 完全一致を探す
+        if (cityCodeToCoordinates[cityCode]) {
+            return cityCodeToCoordinates[cityCode];
+        }
+        
+        // 7桁のコードを6桁や5桁に短縮して探す
+        const shortCode = cityCode.toString().substring(0, 6);
+        if (cityCodeToCoordinates[shortCode]) {
+            return cityCodeToCoordinates[shortCode];
+        }
+        
+        // 都道府県コードから大まかな位置を推定
+        const prefCode = cityCode.toString().substring(0, 2);
+        const prefectureCoordinates = {
+            '01': {lat: 43.0642, lng: 141.3469}, // 北海道
+            '02': {lat: 40.8244, lng: 140.7400}, // 青森県
+            '03': {lat: 39.7036, lng: 141.1527}, // 岩手県
+            '04': {lat: 38.2682, lng: 140.8722}, // 宮城県
+            '05': {lat: 39.7186, lng: 140.1024}, // 秋田県
+            '06': {lat: 38.2404, lng: 140.3637}, // 山形県
+            '07': {lat: 37.7503, lng: 140.4678}, // 福島県
+            '08': {lat: 36.3418, lng: 140.4468}, // 茨城県
+            '09': {lat: 36.5657, lng: 139.8836}, // 栃木県
+            '10': {lat: 36.3911, lng: 139.0608}, // 群馬県
+            '11': {lat: 35.8617, lng: 139.6455}, // 埼玉県
+            '12': {lat: 35.6074, lng: 140.1065}, // 千葉県
+            '13': {lat: 35.6762, lng: 139.6503}, // 東京都
+            '14': {lat: 35.4478, lng: 139.6425}, // 神奈川県
+            '15': {lat: 37.9022, lng: 139.0235}, // 新潟県
+            '16': {lat: 36.6953, lng: 137.2113}, // 富山県
+            '17': {lat: 36.5947, lng: 136.6256}, // 石川県
+            '18': {lat: 36.0652, lng: 136.2219}, // 福井県
+            '19': {lat: 35.6640, lng: 138.5683}, // 山梨県
+            '20': {lat: 36.6513, lng: 138.1809}, // 長野県
+            '21': {lat: 35.3912, lng: 136.7223}, // 岐阜県
+            '22': {lat: 34.9769, lng: 138.3831}, // 静岡県
+            '23': {lat: 35.1802, lng: 136.9065}, // 愛知県
+            '24': {lat: 34.7303, lng: 136.5086}, // 三重県
+            '25': {lat: 35.0045, lng: 135.8686}, // 滋賀県
+            '26': {lat: 35.0213, lng: 135.7556}, // 京都府
+            '27': {lat: 34.6863, lng: 135.5200}, // 大阪府
+            '28': {lat: 34.6901, lng: 135.1830}, // 兵庫県
+            '29': {lat: 34.6851, lng: 135.8329}, // 奈良県
+            '30': {lat: 34.2260, lng: 135.1675}, // 和歌山県
+            '31': {lat: 35.5039, lng: 134.2378}, // 鳥取県
+            '32': {lat: 35.4723, lng: 133.0505}, // 島根県
+            '33': {lat: 34.6617, lng: 133.9350}, // 岡山県
+            '34': {lat: 34.3966, lng: 132.4596}, // 広島県
+            '35': {lat: 34.1859, lng: 131.4705}, // 山口県
+            '36': {lat: 34.0658, lng: 134.5593}, // 徳島県
+            '37': {lat: 34.3401, lng: 134.0434}, // 香川県
+            '38': {lat: 33.8416, lng: 132.7657}, // 愛媛県
+            '39': {lat: 33.5597, lng: 133.5311}, // 高知県
+            '40': {lat: 33.6064, lng: 130.4183}, // 福岡県
+            '41': {lat: 33.2494, lng: 130.2988}, // 佐賀県
+            '42': {lat: 32.7448, lng: 129.8737}, // 長崎県
+            '43': {lat: 32.7898, lng: 130.7417}, // 熊本県
+            '44': {lat: 33.2382, lng: 131.6126}, // 大分県
+            '45': {lat: 31.9111, lng: 131.4239}, // 宮崎県
+            '46': {lat: 31.5602, lng: 130.5581}, // 鹿児島県
+            '47': {lat: 26.2124, lng: 127.6809}  // 沖縄県
+        };
+        
+        if (prefectureCoordinates[prefCode]) {
+            // 都道府県の中心座標に少しランダムなオフセットを加える
+            const baseCoord = prefectureCoordinates[prefCode];
+            return {
+                lat: baseCoord.lat + (Math.random() - 0.5) * 0.5,
+                lng: baseCoord.lng + (Math.random() - 0.5) * 0.5,
+                name: cityName || prefectureName
+            };
+        }
+        
+        return null;
+    }
     
     // 地図の初期化
     function initializeMap() {
@@ -326,47 +490,38 @@
             
             console.log('生データサンプル:', jsonData.slice(0, 3));
             
-            // データの処理（提供された形式に合わせる）
+            // データの処理（city_codeを使用して座標を取得）
             allData = jsonData.map(row => {
-                // データ形式に基づいて正確に読み取る
-                const lat = parseFloat(row.latitude);
-                const lng = parseFloat(row.longitude);
-                const income = parseFloat(row.average_income);
+                const cityCode = row.city_code || '';
+                const prefectureName = row.prefecture_name || '';
+                const cityName = row.city_name || '';
+                const income = parseFloat(row.average_income) || 0;
                 
-                // データの検証
-                if (isNaN(lat) || isNaN(lng) || isNaN(income)) {
-                    console.warn('無効なデータ:', row);
+                // city_codeから座標を取得
+                const coords = getCoordinatesFromCityCode(cityCode, prefectureName, cityName);
+                
+                if (!coords) {
+                    console.warn('座標が見つかりません:', cityCode, prefectureName, cityName);
                     return null;
                 }
                 
                 return {
                     prefecture_code: row.prefecture_code,
-                    prefecture_name: row.prefecture_name || '',
-                    city_code: row.city_code,
-                    city_name: row.city_name || '',
+                    prefecture_name: prefectureName,
+                    city_code: cityCode,
+                    city_name: cityName,
                     district_name: row.district_name || '',
                     sub_area_name: row.sub_area_name || '',
-                    latitude: lat,
-                    longitude: lng,
+                    latitude: coords.lat,
+                    longitude: coords.lng,
                     average_income: income,
                     population: parseInt(row.population) || 0,
                     household_count: parseInt(row.household_count) || 0,
                     area_type: row.area_type || ''
                 };
             }).filter(item => {
-                // nullを除外し、日本の座標範囲内のデータのみ使用
-                if (!item) return false;
-                
-                // 日本の実際の座標範囲（より正確）
-                const isValidCoords = item.latitude >= 20 && item.latitude <= 46 &&
-                                    item.longitude >= 122 && item.longitude <= 154 &&
-                                    item.average_income > 0;
-                
-                if (!isValidCoords) {
-                    console.log('範囲外の座標:', item.latitude, item.longitude, item.prefecture_name, item.city_name);
-                }
-                
-                return isValidCoords;
+                // nullと無効なデータを除外
+                return item && item.latitude && item.longitude && item.average_income > 0;
             });
             
             if (allData.length === 0) {
