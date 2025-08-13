@@ -288,8 +288,8 @@
             minZoom: 4
         }).addTo(map);
         
-        // マーカーレイヤーグループ
-        markerLayer = L.layerGroup().addTo(map);
+        // マーカーレイヤーグループ（ヒートマップより上に表示）
+        markerLayer = L.layerGroup();
     }
     
     // カラースケール（画像の凡例に合わせた配色）
@@ -324,45 +324,46 @@
             // JSONに変換
             const jsonData = XLSX.utils.sheet_to_json(worksheet);
             
-            console.log('サンプルデータ:', jsonData[0]); // デバッグ用
+            console.log('生データサンプル:', jsonData.slice(0, 3));
             
-            // データの処理（座標の順序に注意）
+            // データの処理（提供された形式に合わせる）
             allData = jsonData.map(row => {
-                // 緯度と経度の列名をチェック（順序が逆になっている可能性を考慮）
-                let lat = parseFloat(row.latitude || row['緯度'] || row.lat || 0);
-                let lng = parseFloat(row.longitude || row['経度'] || row.lng || row.lon || 0);
+                // データ形式に基づいて正確に読み取る
+                const lat = parseFloat(row.latitude);
+                const lng = parseFloat(row.longitude);
+                const income = parseFloat(row.average_income);
                 
-                // 座標が逆になっている可能性をチェック
-                // 日本の経度は約122-146、緯度は約24-46
-                // もし緯度が100以上なら、緯度と経度が逆の可能性が高い
-                if (lat > 100 && lng < 50) {
-                    // 緯度と経度を入れ替える
-                    const temp = lat;
-                    lat = lng;
-                    lng = temp;
-                    console.log('座標を入れ替えました:', lat, lng);
+                // データの検証
+                if (isNaN(lat) || isNaN(lng) || isNaN(income)) {
+                    console.warn('無効なデータ:', row);
+                    return null;
                 }
                 
-                const income = parseFloat(row.average_income || row['平均世帯年収'] || row['世帯年収'] || row.income || 0);
-                
                 return {
-                    prefecture_name: row.prefecture_name || row['都道府県名'] || row['都道府県'] || '',
-                    city_name: row.city_name || row['市区町村名'] || row['市区町村'] || '',
-                    district_name: row.district_name || row['区名'] || row['地区名'] || '',
+                    prefecture_code: row.prefecture_code,
+                    prefecture_name: row.prefecture_name || '',
+                    city_code: row.city_code,
+                    city_name: row.city_name || '',
+                    district_name: row.district_name || '',
+                    sub_area_name: row.sub_area_name || '',
                     latitude: lat,
                     longitude: lng,
                     average_income: income,
-                    population: parseInt(row.population || row['人口'] || 0),
-                    household_count: parseInt(row.household_count || row['世帯数'] || 0)
+                    population: parseInt(row.population) || 0,
+                    household_count: parseInt(row.household_count) || 0,
+                    area_type: row.area_type || ''
                 };
             }).filter(item => {
-                // 日本の座標範囲内のデータのみ使用（より正確な範囲）
+                // nullを除外し、日本の座標範囲内のデータのみ使用
+                if (!item) return false;
+                
+                // 日本の実際の座標範囲（より正確）
                 const isValidCoords = item.latitude >= 20 && item.latitude <= 46 &&
                                     item.longitude >= 122 && item.longitude <= 154 &&
                                     item.average_income > 0;
                 
-                if (!isValidCoords && item.latitude !== 0) {
-                    console.log('無効な座標:', item.latitude, item.longitude, item.prefecture_name);
+                if (!isValidCoords) {
+                    console.log('範囲外の座標:', item.latitude, item.longitude, item.prefecture_name, item.city_name);
                 }
                 
                 return isValidCoords;
@@ -372,15 +373,34 @@
                 throw new Error('有効なデータが見つかりませんでした');
             }
             
+            // データの分布を確認
+            const prefectures = {};
+            allData.forEach(item => {
+                if (!prefectures[item.prefecture_name]) {
+                    prefectures[item.prefecture_name] = 0;
+                }
+                prefectures[item.prefecture_name]++;
+            });
+            
+            console.log('都道府県別データ数:', prefectures);
             console.log(`読み込み完了: ${allData.length}件のデータ`);
+            
             // 収入の分布を確認
             const incomeRanges = {
                 '0-400': allData.filter(d => d.average_income < 400).length,
-                '400-500': allData.filter(d => d.average_income >= 400 && d.average_income < 500).length,
-                '500-600': allData.filter(d => d.average_income >= 500 && d.average_income < 600).length,
+                '400-450': allData.filter(d => d.average_income >= 400 && d.average_income < 450).length,
+                '450-500': allData.filter(d => d.average_income >= 450 && d.average_income < 500).length,
+                '500-550': allData.filter(d => d.average_income >= 500 && d.average_income < 550).length,
+                '550-600': allData.filter(d => d.average_income >= 550 && d.average_income < 600).length,
                 '600+': allData.filter(d => d.average_income >= 600).length
             };
             console.log('収入分布:', incomeRanges);
+            
+            // 座標の範囲を確認
+            const latitudes = allData.map(d => d.latitude);
+            const longitudes = allData.map(d => d.longitude);
+            console.log('緯度範囲:', Math.min(...latitudes), '〜', Math.max(...latitudes));
+            console.log('経度範囲:', Math.min(...longitudes), '〜', Math.max(...longitudes));
             
             return allData;
             
@@ -392,45 +412,70 @@
     
     // ヒートマップの作成
     function createHeatmap(data) {
+        console.log('ヒートマップ作成開始:', data.length + '件のデータ');
+        
         if (heatLayer) {
             map.removeLayer(heatLayer);
+            heatLayer = null;
         }
         
-        // ヒートマップ用データの準備（収入に応じて強度を設定）
+        if (data.length === 0) {
+            console.log('データが空のため、ヒートマップを作成できません');
+            return;
+        }
+        
+        // ヒートマップ用データの準備
         const heatData = data.map(item => {
-            // 収入に基づいて強度を設定（低収入は低い値、高収入は高い値）
-            let intensity;
+            // 強度を収入に基づいて設定
+            let intensity = 0.5; // デフォルト値
+            
             if (item.average_income < 400) {
-                intensity = 0.2 + (item.average_income / 400) * 0.2; // 0.2-0.4
+                intensity = 0.3;
+            } else if (item.average_income < 450) {
+                intensity = 0.4;
             } else if (item.average_income < 500) {
-                intensity = 0.4 + ((item.average_income - 400) / 100) * 0.2; // 0.4-0.6
+                intensity = 0.5;
+            } else if (item.average_income < 550) {
+                intensity = 0.6;
             } else if (item.average_income < 600) {
-                intensity = 0.6 + ((item.average_income - 500) / 100) * 0.2; // 0.6-0.8
+                intensity = 0.7;
+            } else if (item.average_income < 650) {
+                intensity = 0.85;
             } else {
-                intensity = 0.8 + Math.min((item.average_income - 600) / 200, 0.2); // 0.8-1.0
+                intensity = 1.0;
             }
+            
+            // [緯度, 経度, 強度]の配列を返す
             return [item.latitude, item.longitude, intensity];
         });
         
-        // ヒートマップレイヤーの作成（青→緑→黄→赤のグラデーション）
-        heatLayer = L.heatLayer(heatData, {
-            radius: 25,
-            blur: 15,
-            maxZoom: 12,
-            max: 1.0,
-            gradient: {
-                0.0: 'rgba(0, 0, 255, 0)',      // 透明青
-                0.2: 'rgba(0, 0, 255, 0.5)',    // 青（低収入）
-                0.3: 'rgba(0, 128, 255, 0.6)',  // 水色
-                0.4: 'rgba(0, 255, 255, 0.7)',  // シアン
-                0.5: 'rgba(0, 255, 0, 0.8)',    // 緑
-                0.6: 'rgba(255, 255, 0, 0.9)',  // 黄色（中収入）
-                0.7: 'rgba(255, 200, 0, 0.9)',  // オレンジ黄
-                0.8: 'rgba(255, 128, 0, 1)',    // オレンジ
-                0.9: 'rgba(255, 0, 0, 1)',      // 赤（高収入）
-                1.0: 'rgba(128, 0, 0, 1)'       // 濃い赤
-            }
-        }).addTo(map);
+        console.log('ヒートデータサンプル:', heatData.slice(0, 5));
+        
+        // ヒートマップレイヤーの作成
+        try {
+            heatLayer = L.heatLayer(heatData, {
+                radius: 30,
+                blur: 20,
+                maxZoom: 10,
+                max: 1.0,
+                gradient: {
+                    0.0: 'blue',
+                    0.25: 'cyan',
+                    0.5: 'lime',
+                    0.65: 'yellow',
+                    0.8: 'orange',
+                    0.95: 'red',
+                    1.0: 'darkred'
+                }
+            });
+            
+            // ヒートマップを地図に追加
+            heatLayer.addTo(map);
+            console.log('ヒートマップを地図に追加しました');
+            
+        } catch (error) {
+            console.error('ヒートマップ作成エラー:', error);
+        }
     }
     
     // マーカーの作成
@@ -439,27 +484,27 @@
         
         const zoom = map.getZoom();
         
-        // ズームレベル8以上でマーカー表示
-        if (zoom >= 8) {
+        // ズームレベル7以上でマーカー表示（ヒートマップと併用）
+        if (zoom >= 7) {
             // 表示するデータを制限（パフォーマンス対策）
             const bounds = map.getBounds();
             const visibleData = data.filter(item => {
                 return bounds.contains([item.latitude, item.longitude]);
             });
             
-            // 最大500件まで表示
-            const displayData = visibleData.slice(0, 500);
+            // 最大300件まで表示
+            const displayData = visibleData.slice(0, 300);
             
             displayData.forEach(item => {
                 const color = getColor(item.average_income);
                 
                 const marker = L.circleMarker([item.latitude, item.longitude], {
-                    radius: zoom >= 10 ? 8 : 6,
+                    radius: zoom >= 10 ? 7 : zoom >= 8 ? 5 : 4,
                     fillColor: color,
                     color: '#fff',
-                    weight: 1.5,
-                    opacity: 1,
-                    fillOpacity: 0.8
+                    weight: 1,
+                    opacity: 0.9,
+                    fillOpacity: 0.7
                 });
                 
                 // ポップアップの内容
@@ -484,6 +529,8 @@
                 
                 markerLayer.addLayer(marker);
             });
+            
+            console.log('マーカー作成:', displayData.length + '個');
         }
     }
     
@@ -545,17 +592,52 @@
         try {
             // 地図の初期化
             initializeMap();
+            console.log('地図を初期化しました');
             
             // データの読み込み
             const data = await loadData();
+            console.log('データ読み込み完了:', data.length + '件');
+            
+            // データがある場合、最初のデータポイントを中心に地図を調整
+            if (data.length > 0) {
+                // データの中心座標を計算
+                const latitudes = data.map(d => d.latitude);
+                const longitudes = data.map(d => d.longitude);
+                const centerLat = (Math.min(...latitudes) + Math.max(...latitudes)) / 2;
+                const centerLng = (Math.min(...longitudes) + Math.max(...longitudes)) / 2;
+                
+                console.log('データの中心座標:', centerLat, centerLng);
+                
+                // 地図の中心とズームを調整
+                if (centerLat && centerLng) {
+                    // データの範囲に基づいてズームレベルを決定
+                    const latRange = Math.max(...latitudes) - Math.min(...latitudes);
+                    const lngRange = Math.max(...longitudes) - Math.min(...longitudes);
+                    const maxRange = Math.max(latRange, lngRange);
+                    
+                    let zoomLevel = 5;
+                    if (maxRange < 0.5) zoomLevel = 11;
+                    else if (maxRange < 1) zoomLevel = 10;
+                    else if (maxRange < 2) zoomLevel = 9;
+                    else if (maxRange < 5) zoomLevel = 8;
+                    else if (maxRange < 10) zoomLevel = 7;
+                    else if (maxRange < 20) zoomLevel = 6;
+                    
+                    map.setView([centerLat, centerLng], zoomLevel);
+                    console.log('地図を調整:', centerLat, centerLng, 'ズーム:', zoomLevel);
+                }
+            }
             
             // データポイント数の表示
             updateDataPoints(data.length);
             
-            // ヒートマップの作成
+            // ヒートマップを最初に作成（マーカーの下に表示）
             createHeatmap(data);
             
-            // マーカーの作成（初期ズームレベルに応じて）
+            // マーカーレイヤーを地図に追加（ヒートマップの上に表示）
+            markerLayer.addTo(map);
+            
+            // 初期ズームレベルでのマーカー作成
             createMarkers(data);
             
             // イベントリスナーの設定
@@ -563,6 +645,10 @@
             
             // ローディング画面を非表示
             document.getElementById('loading').style.display = 'none';
+            
+            // デバッグ情報
+            console.log('ヒートマップレイヤー:', heatLayer);
+            console.log('マーカーレイヤー:', markerLayer);
             
             // 5秒後に情報ポップアップを自動で閉じる
             setTimeout(() => {
@@ -573,6 +659,7 @@
             }, 5000);
             
         } catch (error) {
+            console.error('メイン処理エラー:', error);
             showError('データファイルの読み込みに失敗しました。<br>japan_household_income_data.xlsxファイルを確認してください。');
         }
     }
