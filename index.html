@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>日本全国世帯年収ヒートマップ - GeoJSON版</title>
+    <title>日本全国世帯年収ヒートマップ</title>
 
 ```
 <!-- Leaflet CSS -->
@@ -175,21 +175,6 @@
         100% { transform: rotate(360deg); }
     }
     
-    .error-message {
-        position: fixed;
-        top: 50%;
-        left: 50%;
-        transform: translate(-50%, -50%);
-        background: #fff;
-        color: #d32f2f;
-        padding: 20px 30px;
-        border-radius: 8px;
-        box-shadow: 0 4px 20px rgba(0,0,0,0.2);
-        z-index: 2001;
-        max-width: 400px;
-        text-align: center;
-    }
-    
     .popup-content {
         font-size: 13px;
         line-height: 1.5;
@@ -209,12 +194,6 @@
         color: #007bff;
         margin: 10px 0;
     }
-    
-    .popup-content .detail-item {
-        margin: 3px 0;
-        font-size: 12px;
-        color: #666;
-    }
 </style>
 ```
 
@@ -224,7 +203,7 @@
         <div class="loading-spinner"></div>
         <div>データを読み込み中...</div>
         <div style="font-size: 12px; margin-top: 8px; color: #666;">
-            世帯年収データとGeoJSONを処理しています
+            世帯年収データを処理しています
         </div>
     </div>
 
@@ -331,21 +310,52 @@
 
 <!-- Leaflet JS -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+<!-- Leaflet Heat プラグイン -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.heat/0.2.0/leaflet-heat.js"></script>
 <!-- SheetJS for Excel reading -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 
 <script>
     // グローバル変数
     let map;
-    let currentGeoJSONLayer;
-    let incomeData = {};
+    let heatmapLayer;
+    let markerLayer;
     let municipalityData = {};
     let smallAreaData = {};
     let currentDataLevel = 'municipality';
     let currentDataField = 'income';
-    let geoJSONData = {
-        municipality: null,
-        smallarea: null
+    
+    // 市区町村の中心座標データ（主要都市）
+    const cityCoordinates = {
+        // 東京23区
+        '13101': {lat: 35.6894, lng: 139.6917, name: '千代田区'},
+        '13102': {lat: 35.6595, lng: 139.7291, name: '港区'},
+        '13103': {lat: 35.6938, lng: 139.7034, name: '新宿区'},
+        '13104': {lat: 35.7295, lng: 139.7109, name: '文京区'},
+        '13105': {lat: 35.7066, lng: 139.7746, name: '台東区'},
+        '13106': {lat: 35.6959, lng: 139.8140, name: '墨田区'},
+        '13107': {lat: 35.6828, lng: 139.8090, name: '江東区'},
+        '13108': {lat: 35.6228, lng: 139.7228, name: '品川区'},
+        '13109': {lat: 35.6332, lng: 139.7016, name: '目黒区'},
+        '13110': {lat: 35.6020, lng: 139.6685, name: '大田区'},
+        '13111': {lat: 35.6368, lng: 139.6534, name: '世田谷区'},
+        '13112': {lat: 35.6640, lng: 139.6982, name: '渋谷区'},
+        '13113': {lat: 35.7061, lng: 139.6514, name: '中野区'},
+        '13114': {lat: 35.7378, lng: 139.6289, name: '杉並区'},
+        '13115': {lat: 35.7320, lng: 139.7155, name: '豊島区'},
+        '13116': {lat: 35.7430, lng: 139.7394, name: '北区'},
+        '13117': {lat: 35.7380, lng: 139.7619, name: '荒川区'},
+        '13118': {lat: 35.7514, lng: 139.6795, name: '板橋区'},
+        '13119': {lat: 35.7522, lng: 139.6116, name: '練馬区'},
+        '13120': {lat: 35.7756, lng: 139.8045, name: '足立区'},
+        '13121': {lat: 35.7493, lng: 139.8472, name: '葛飾区'},
+        '13122': {lat: 35.6732, lng: 139.8741, name: '江戸川区'},
+        // 他の主要都市
+        '14100': {lat: 35.4478, lng: 139.6425, name: '横浜市'},
+        '23100': {lat: 35.1802, lng: 136.9065, name: '名古屋市'},
+        '27100': {lat: 34.6937, lng: 135.5023, name: '大阪市'},
+        '40100': {lat: 33.6064, lng: 130.4183, name: '福岡市'},
+        '01100': {lat: 43.0642, lng: 141.3469, name: '札幌市'}
     };
     
     // 地図の初期化
@@ -358,6 +368,9 @@
             maxZoom: 18,
             minZoom: 4
         }).addTo(map);
+        
+        // レイヤーグループの初期化
+        markerLayer = L.layerGroup();
     }
     
     // カラースケール
@@ -373,6 +386,78 @@
                value >= 350 ? '#FED976' :
                value >= 300 ? '#FFEDA0' :
                               '#FFFFCC';
+    }
+    
+    // 市区町村コードから座標を取得
+    function getCoordinatesForCity(cityCode, cityName, prefName) {
+        // 既知の座標があれば使用
+        if (cityCoordinates[cityCode]) {
+            return cityCoordinates[cityCode];
+        }
+        
+        // 都道府県の中心座標をベースに推定
+        const prefCoords = {
+            '北海道': {lat: 43.0642, lng: 141.3469},
+            '青森県': {lat: 40.8244, lng: 140.7400},
+            '岩手県': {lat: 39.7036, lng: 141.1527},
+            '宮城県': {lat: 38.2682, lng: 140.8722},
+            '秋田県': {lat: 39.7186, lng: 140.1024},
+            '山形県': {lat: 38.2404, lng: 140.3637},
+            '福島県': {lat: 37.7503, lng: 140.4678},
+            '茨城県': {lat: 36.3418, lng: 140.4468},
+            '栃木県': {lat: 36.5657, lng: 139.8836},
+            '群馬県': {lat: 36.3911, lng: 139.0608},
+            '埼玉県': {lat: 35.8617, lng: 139.6455},
+            '千葉県': {lat: 35.6074, lng: 140.1065},
+            '東京都': {lat: 35.6762, lng: 139.6503},
+            '神奈川県': {lat: 35.4478, lng: 139.6425},
+            '新潟県': {lat: 37.9022, lng: 139.0235},
+            '富山県': {lat: 36.6953, lng: 137.2113},
+            '石川県': {lat: 36.5947, lng: 136.6256},
+            '福井県': {lat: 36.0652, lng: 136.2219},
+            '山梨県': {lat: 35.6640, lng: 138.5683},
+            '長野県': {lat: 36.6513, lng: 138.1809},
+            '岐阜県': {lat: 35.3912, lng: 136.7223},
+            '静岡県': {lat: 34.9769, lng: 138.3831},
+            '愛知県': {lat: 35.1802, lng: 136.9065},
+            '三重県': {lat: 34.7303, lng: 136.5086},
+            '滋賀県': {lat: 35.0045, lng: 135.8686},
+            '京都府': {lat: 35.0213, lng: 135.7556},
+            '大阪府': {lat: 34.6863, lng: 135.5200},
+            '兵庫県': {lat: 34.6901, lng: 135.1830},
+            '奈良県': {lat: 34.6851, lng: 135.8329},
+            '和歌山県': {lat: 34.2260, lng: 135.1675},
+            '鳥取県': {lat: 35.5039, lng: 134.2378},
+            '島根県': {lat: 35.4723, lng: 133.0505},
+            '岡山県': {lat: 34.6617, lng: 133.9350},
+            '広島県': {lat: 34.3966, lng: 132.4596},
+            '山口県': {lat: 34.1859, lng: 131.4705},
+            '徳島県': {lat: 34.0658, lng: 134.5593},
+            '香川県': {lat: 34.3401, lng: 134.0434},
+            '愛媛県': {lat: 33.8416, lng: 132.7657},
+            '高知県': {lat: 33.5597, lng: 133.5311},
+            '福岡県': {lat: 33.6064, lng: 130.4183},
+            '佐賀県': {lat: 33.2494, lng: 130.2988},
+            '長崎県': {lat: 32.7448, lng: 129.8737},
+            '熊本県': {lat: 32.7898, lng: 130.7417},
+            '大分県': {lat: 33.2382, lng: 131.6126},
+            '宮崎県': {lat: 31.9111, lng: 131.4239},
+            '鹿児島県': {lat: 31.5602, lng: 130.5581},
+            '沖縄県': {lat: 26.2124, lng: 127.6809}
+        };
+        
+        const baseCoords = prefCoords[prefName];
+        if (baseCoords) {
+            // 都道府県内でランダムに少しずらす（陸地の範囲内に収める）
+            const offset = 0.3; // 最大オフセット量を減らす
+            return {
+                lat: baseCoords.lat + (Math.random() - 0.5) * offset,
+                lng: baseCoords.lng + (Math.random() - 0.5) * offset,
+                name: cityName
+            };
+        }
+        
+        return null;
     }
     
     // Excelデータの読み込み
@@ -393,41 +478,60 @@
             
             console.log('データサンプル:', jsonData.slice(0, 3));
             
-            // データを処理して市区町村と小地域に分類
+            // データを処理
             jsonData.forEach(row => {
                 const prefCode = String(row['JIS都道府県コード'] || '').padStart(2, '0');
                 const cityCode = String(row['JIS市区町村コード'] || '');
                 const smallCode = String(row['小地域コード'] || '');
                 const income = parseFloat(row['世帯年収_万円']) || 0;
                 const taxable = parseFloat(row['課税対象所得_千円']) || 0;
+                const prefName = row['都道府県名'];
+                const cityName = row['市区町村名'];
                 
-                if (cityCode) {
+                if (cityCode && income > 0) {
                     // 6桁コード（市区町村）
                     const code6 = prefCode + cityCode.padStart(4, '0');
-                    municipalityData[code6] = {
-                        prefecture: row['都道府県名'],
-                        city: row['市区町村名'],
-                        income: income,
-                        taxable: taxable,
-                        households: parseInt(row['推定世帯数']) || 0,
-                        year: row['データ年度'],
-                        source: row['データソース']
-                    };
+                    
+                    // 座標を取得
+                    const coords = getCoordinatesForCity(code6, cityName, prefName);
+                    
+                    if (coords) {
+                        municipalityData[code6] = {
+                            prefecture: prefName,
+                            city: cityName,
+                            income: income,
+                            taxable: taxable,
+                            households: parseInt(row['推定世帯数']) || 0,
+                            year: row['データ年度'],
+                            source: row['データソース'],
+                            lat: coords.lat,
+                            lng: coords.lng
+                        };
+                    }
                 }
                 
-                if (smallCode) {
+                if (smallCode && income > 0) {
                     // 11桁コード（小地域）
                     const code11 = prefCode + cityCode.padStart(4, '0') + smallCode.padStart(5, '0');
-                    smallAreaData[code11] = {
-                        prefecture: row['都道府県名'],
-                        city: row['市区町村名'],
-                        area: row['小地域名'],
-                        income: income,
-                        taxable: taxable,
-                        households: parseInt(row['推定世帯数']) || 0,
-                        year: row['データ年度'],
-                        source: row['データソース']
-                    };
+                    
+                    // 市区町村の座標をベースに少しずらす
+                    const code6 = prefCode + cityCode.padStart(4, '0');
+                    const baseCoords = getCoordinatesForCity(code6, cityName, prefName);
+                    
+                    if (baseCoords) {
+                        smallAreaData[code11] = {
+                            prefecture: prefName,
+                            city: cityName,
+                            area: row['小地域名'],
+                            income: income,
+                            taxable: taxable,
+                            households: parseInt(row['推定世帯数']) || 0,
+                            year: row['データ年度'],
+                            source: row['データソース'],
+                            lat: baseCoords.lat + (Math.random() - 0.5) * 0.05,
+                            lng: baseCoords.lng + (Math.random() - 0.5) * 0.05
+                        };
+                    }
                 }
             });
             
@@ -456,192 +560,110 @@
         }
     }
     
-    // GeoJSONの読み込み
-    async function loadGeoJSON() {
-        try {
-            // 市区町村GeoJSON（N03など国土数値情報のGeoJSON）
-            // ここでは仮のURLを使用。実際のGeoJSONファイルのパスに置き換えてください
-            const municipalityResponse = await fetch('./municipalities.geojson');
-            if (municipalityResponse.ok) {
-                geoJSONData.municipality = await municipalityResponse.json();
-                console.log('市区町村GeoJSON読み込み完了');
-            }
-        } catch (error) {
-            console.warn('GeoJSON読み込みエラー:', error);
-            // GeoJSONが無い場合はポイントデータとして表示
-            createPointData();
+    // ヒートマップの作成
+    function createHeatmap() {
+        // 既存のレイヤーを削除
+        if (heatmapLayer) {
+            map.removeLayer(heatmapLayer);
         }
+        if (markerLayer) {
+            map.removeLayer(markerLayer);
+            markerLayer.clearLayers();
+        }
+        
+        const dataSource = currentDataLevel === 'municipality' ? municipalityData : smallAreaData;
+        const heatData = [];
+        
+        // ヒートマップ用のデータを準備
+        Object.values(dataSource).forEach(data => {
+            if (data.lat && data.lng && data.income > 0) {
+                // 収入を正規化（0-1の範囲）
+                const intensity = Math.min(data.income / 800, 1);
+                
+                // メインのデータポイント
+                heatData.push([data.lat, data.lng, intensity]);
+                
+                // 周辺にも少しデータポイントを追加（ヒートマップを滑らかにするため）
+                for (let i = 0; i < 3; i++) {
+                    const offsetLat = data.lat + (Math.random() - 0.5) * 0.02;
+                    const offsetLng = data.lng + (Math.random() - 0.5) * 0.02;
+                    heatData.push([offsetLat, offsetLng, intensity * 0.8]);
+                }
+            }
+        });
+        
+        console.log('ヒートマップデータポイント数:', heatData.length);
+        
+        // ヒートマップレイヤーを作成
+        if (heatData.length > 0) {
+            heatmapLayer = L.heatLayer(heatData, {
+                radius: 25,
+                blur: 15,
+                maxZoom: 10,
+                max: 1.0,
+                gradient: {
+                    0.0: 'blue',
+                    0.25: 'cyan',
+                    0.5: 'lime',
+                    0.65: 'yellow',
+                    0.8: 'orange',
+                    0.95: 'red',
+                    1.0: 'darkred'
+                }
+            }).addTo(map);
+        }
+        
+        // ズームレベルが高い時はマーカーも追加
+        map.on('zoomend', function() {
+            updateMarkersOnZoom();
+        });
     }
     
-    // GeoJSONレイヤーの作成
-    function createGeoJSONLayer(level) {
-        if (currentGeoJSONLayer) {
-            map.removeLayer(currentGeoJSONLayer);
-        }
+    // ズーム時のマーカー更新
+    function updateMarkersOnZoom() {
+        const zoom = map.getZoom();
         
-        const dataSource = level === 'municipality' ? municipalityData : smallAreaData;
-        const geoJSON = geoJSONData[level];
-        
-        if (!geoJSON) {
-            // GeoJSONが無い場合はポイントマーカーで表示
-            createPointMarkers(dataSource);
-            return;
-        }
-        
-        currentGeoJSONLayer = L.geoJSON(geoJSON, {
-            style: feature => {
-                const code = feature.properties.localgov_code || 
-                            feature.properties.N03_007 || 
-                            feature.properties.code;
-                
-                const data = dataSource[code];
-                const value = data ? 
-                    (currentDataField === 'income' ? data.income : data.taxable / 1000) : 
-                    null;
-                
-                return {
-                    fillColor: getColor(value),
-                    weight: 1,
-                    opacity: 1,
-                    color: '#666',
-                    fillOpacity: parseFloat(document.getElementById('opacity').value)
-                };
-            },
-            onEachFeature: (feature, layer) => {
-                const code = feature.properties.localgov_code || 
-                           feature.properties.N03_007 || 
-                           feature.properties.code;
-                
-                const data = dataSource[code];
-                
-                if (data) {
+        // ズームレベルが10以上の時にマーカーを表示
+        if (zoom >= 10) {
+            if (markerLayer) {
+                markerLayer.clearLayers();
+            }
+            
+            const dataSource = currentDataLevel === 'municipality' ? municipalityData : smallAreaData;
+            const bounds = map.getBounds();
+            
+            Object.values(dataSource).forEach(data => {
+                if (data.lat && data.lng && bounds.contains([data.lat, data.lng])) {
+                    const marker = L.circleMarker([data.lat, data.lng], {
+                        radius: 5,
+                        fillColor: getColor(data.income),
+                        color: '#fff',
+                        weight: 1,
+                        opacity: 1,
+                        fillOpacity: 0.8
+                    });
+                    
                     const popupContent = `
                         <div class="popup-content">
                             <h5>${data.prefecture} ${data.city}${data.area ? ' ' + data.area : ''}</h5>
                             <div class="income-value">${data.income.toFixed(1)}万円</div>
-                            <div class="detail-item">課税対象所得: ${data.taxable.toLocaleString()}千円</div>
-                            <div class="detail-item">推定世帯数: ${data.households.toLocaleString()}世帯</div>
-                            <div class="detail-item">データ年度: ${data.year}年</div>
-                            <div class="detail-item">ソース: ${data.source}</div>
                         </div>
                     `;
-                    layer.bindPopup(popupContent);
+                    marker.bindPopup(popupContent);
+                    
+                    markerLayer.addLayer(marker);
                 }
-                
-                // ホバー時のハイライト
-                layer.on({
-                    mouseover: e => {
-                        e.target.setStyle({
-                            weight: 3,
-                            color: '#333',
-                            fillOpacity: 0.9
-                        });
-                    },
-                    mouseout: e => {
-                        currentGeoJSONLayer.resetStyle(e.target);
-                    }
-                });
-            }
-        }).addTo(map);
-    }
-    
-    // ポイントマーカーの作成（GeoJSONが無い場合のフォールバック）
-    function createPointMarkers(dataSource) {
-        if (currentGeoJSONLayer) {
-            map.removeLayer(currentGeoJSONLayer);
-        }
-        
-        currentGeoJSONLayer = L.layerGroup();
-        
-        // 都道府県中心座標（仮データ）
-        const prefectureCoords = {
-            '北海道': [43.0642, 141.3469],
-            '青森県': [40.8244, 140.7400],
-            '岩手県': [39.7036, 141.1527],
-            '宮城県': [38.2682, 140.8722],
-            '秋田県': [39.7186, 140.1024],
-            '山形県': [38.2404, 140.3637],
-            '福島県': [37.7503, 140.4678],
-            '茨城県': [36.3418, 140.4468],
-            '栃木県': [36.5657, 139.8836],
-            '群馬県': [36.3911, 139.0608],
-            '埼玉県': [35.8617, 139.6455],
-            '千葉県': [35.6074, 140.1065],
-            '東京都': [35.6762, 139.6503],
-            '神奈川県': [35.4478, 139.6425],
-            '新潟県': [37.9022, 139.0235],
-            '富山県': [36.6953, 137.2113],
-            '石川県': [36.5947, 136.6256],
-            '福井県': [36.0652, 136.2219],
-            '山梨県': [35.6640, 138.5683],
-            '長野県': [36.6513, 138.1809],
-            '岐阜県': [35.3912, 136.7223],
-            '静岡県': [34.9769, 138.3831],
-            '愛知県': [35.1802, 136.9065],
-            '三重県': [34.7303, 136.5086],
-            '滋賀県': [35.0045, 135.8686],
-            '京都府': [35.0213, 135.7556],
-            '大阪府': [34.6863, 135.5200],
-            '兵庫県': [34.6901, 135.1830],
-            '奈良県': [34.6851, 135.8329],
-            '和歌山県': [34.2260, 135.1675],
-            '鳥取県': [35.5039, 134.2378],
-            '島根県': [35.4723, 133.0505],
-            '岡山県': [34.6617, 133.9350],
-            '広島県': [34.3966, 132.4596],
-            '山口県': [34.1859, 131.4705],
-            '徳島県': [34.0658, 134.5593],
-            '香川県': [34.3401, 134.0434],
-            '愛媛県': [33.8416, 132.7657],
-            '高知県': [33.5597, 133.5311],
-            '福岡県': [33.6064, 130.4183],
-            '佐賀県': [33.2494, 130.2988],
-            '長崎県': [32.7448, 129.8737],
-            '熊本県': [32.7898, 130.7417],
-            '大分県': [33.2382, 131.6126],
-            '宮崎県': [31.9111, 131.4239],
-            '鹿児島県': [31.5602, 130.5581],
-            '沖縄県': [26.2124, 127.6809]
-        };
-        
-        Object.entries(dataSource).forEach(([code, data]) => {
-            if (!data.income) return;
-            
-            // 都道府県の座標を基準に少しランダムにずらす
-            const baseCoords = prefectureCoords[data.prefecture];
-            if (!baseCoords) return;
-            
-            const lat = baseCoords[0] + (Math.random() - 0.5) * 0.5;
-            const lng = baseCoords[1] + (Math.random() - 0.5) * 0.5;
-            
-            const value = currentDataField === 'income' ? data.income : data.taxable / 1000;
-            const color = getColor(value);
-            
-            const marker = L.circleMarker([lat, lng], {
-                radius: 6,
-                fillColor: color,
-                color: '#fff',
-                weight: 1,
-                opacity: 1,
-                fillOpacity: parseFloat(document.getElementById('opacity').value)
             });
             
-            const popupContent = `
-                <div class="popup-content">
-                    <h5>${data.prefecture} ${data.city}${data.area ? ' ' + data.area : ''}</h5>
-                    <div class="income-value">${data.income.toFixed(1)}万円</div>
-                    <div class="detail-item">課税対象所得: ${data.taxable.toLocaleString()}千円</div>
-                    <div class="detail-item">推定世帯数: ${data.households.toLocaleString()}世帯</div>
-                    <div class="detail-item">データ年度: ${data.year}年</div>
-                    <div class="detail-item">ソース: ${data.source}</div>
-                </div>
-            `;
-            marker.bindPopup(popupContent);
-            
-            currentGeoJSONLayer.addLayer(marker);
-        });
-        
-        currentGeoJSONLayer.addTo(map);
+            if (!map.hasLayer(markerLayer)) {
+                markerLayer.addTo(map);
+            }
+        } else {
+            // ズームアウト時はマーカーを非表示
+            if (map.hasLayer(markerLayer)) {
+                map.removeLayer(markerLayer);
+            }
+        }
     }
     
     // データレベルの切り替え
@@ -655,67 +677,54 @@
         // 表示を更新
         document.getElementById('currentLevel').textContent = level === 'municipality' ? '市区町村' : '小地域';
         
-        // レイヤーを再作成
-        createGeoJSONLayer(level);
+        // ヒートマップを再作成
+        createHeatmap();
         updateStatistics();
     }
     
     // データフィールドの更新
     function updateDataField() {
         currentDataField = document.getElementById('dataField').value;
-        createGeoJSONLayer(currentDataLevel);
+        createHeatmap();
     }
     
     // 透明度の更新
     function updateOpacity() {
-        const opacity = parseFloat(document.getElementById('opacity').value);
-        
-        if (currentGeoJSONLayer) {
-            if (currentGeoJSONLayer instanceof L.GeoJSON) {
-                currentGeoJSONLayer.setStyle({ fillOpacity: opacity });
-            } else {
-                currentGeoJSONLayer.eachLayer(layer => {
-                    if (layer.setStyle) {
-                        layer.setStyle({ fillOpacity: opacity });
-                    }
-                });
-            }
-        }
+        // ヒートマップの透明度調整は直接できないため、再作成
+        createHeatmap();
     }
     
     // 都道府県フィルター
     function filterByPrefecture() {
         const selectedPref = document.getElementById('prefectureFilter').value;
         
+        // フィルタリング後に再描画
+        createHeatmap();
+        
+        // 選択された都道府県にズーム
         if (selectedPref) {
-            // 選択された都道府県のデータのみ表示
-            const filteredData = {};
             const dataSource = currentDataLevel === 'municipality' ? municipalityData : smallAreaData;
+            const prefData = Object.values(dataSource).filter(d => d.prefecture === selectedPref);
             
-            Object.entries(dataSource).forEach(([code, data]) => {
-                if (data.prefecture === selectedPref) {
-                    filteredData[code] = data;
-                }
-            });
-            
-            // フィルタリングされたデータで再描画
-            if (geoJSONData[currentDataLevel]) {
-                // GeoJSONの場合
-                createGeoJSONLayer(currentDataLevel);
-            } else {
-                // ポイントマーカーの場合
-                createPointMarkers(filteredData);
+            if (prefData.length > 0) {
+                const lats = prefData.map(d => d.lat);
+                const lngs = prefData.map(d => d.lng);
+                const bounds = L.latLngBounds(
+                    [Math.min(...lats), Math.min(...lngs)],
+                    [Math.max(...lats), Math.max(...lngs)]
+                );
+                map.fitBounds(bounds);
             }
-        } else {
-            // 全国表示
-            createGeoJSONLayer(currentDataLevel);
         }
     }
     
     // 統計情報の更新
     function updateStatistics() {
         const dataSource = currentDataLevel === 'municipality' ? municipalityData : smallAreaData;
-        const values = Object.values(dataSource)
+        const selectedPref = document.getElementById('prefectureFilter').value;
+        
+        let values = Object.values(dataSource)
+            .filter(d => !selectedPref || d.prefecture === selectedPref)
             .map(d => d.income)
             .filter(v => v > 0);
         
@@ -736,22 +745,6 @@
         }
     }
     
-    // エラー表示
-    function showError(message) {
-        document.getElementById('loading').style.display = 'none';
-        
-        const errorDiv = document.createElement('div');
-        errorDiv.className = 'error-message';
-        errorDiv.innerHTML = `
-            <h3>⚠️ エラー</h3>
-            <div>${message}</div>
-            <button onclick="location.reload()" style="margin-top: 15px; padding: 8px 16px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer;">
-                再読み込み
-            </button>
-        `;
-        document.body.appendChild(errorDiv);
-    }
-    
     // メイン処理
     async function main() {
         try {
@@ -761,18 +754,20 @@
             // データの読み込み
             await loadIncomeData();
             
-            // GeoJSONの読み込み（オプション）
-            await loadGeoJSON();
-            
-            // 初期表示（市区町村レベル）
-            createGeoJSONLayer('municipality');
+            // ヒートマップの作成
+            createHeatmap();
             
             // ローディング画面を非表示
             document.getElementById('loading').style.display = 'none';
             
         } catch (error) {
             console.error('初期化エラー:', error);
-            showError('データの読み込みに失敗しました。<br>ファイルを確認してください。');
+            document.getElementById('loading').innerHTML = `
+                <div style="color: red;">
+                    エラー: データの読み込みに失敗しました<br>
+                    <small>${error.message}</small>
+                </div>
+            `;
         }
     }
     
