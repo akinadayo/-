@@ -180,7 +180,7 @@
         background: #b71c1c;
     }
 </style>
-
+```
 
 </head>
 <body>
@@ -324,11 +324,25 @@
             // JSONに変換
             const jsonData = XLSX.utils.sheet_to_json(worksheet);
             
-            // データの処理
+            console.log('サンプルデータ:', jsonData[0]); // デバッグ用
+            
+            // データの処理（座標の順序に注意）
             allData = jsonData.map(row => {
-                // 列名のバリエーションに対応
-                const lat = parseFloat(row.latitude || row['緯度'] || row.lat || 0);
-                const lng = parseFloat(row.longitude || row['経度'] || row.lng || row.lon || 0);
+                // 緯度と経度の列名をチェック（順序が逆になっている可能性を考慮）
+                let lat = parseFloat(row.latitude || row['緯度'] || row.lat || 0);
+                let lng = parseFloat(row.longitude || row['経度'] || row.lng || row.lon || 0);
+                
+                // 座標が逆になっている可能性をチェック
+                // 日本の経度は約122-146、緯度は約24-46
+                // もし緯度が100以上なら、緯度と経度が逆の可能性が高い
+                if (lat > 100 && lng < 50) {
+                    // 緯度と経度を入れ替える
+                    const temp = lat;
+                    lat = lng;
+                    lng = temp;
+                    console.log('座標を入れ替えました:', lat, lng);
+                }
+                
                 const income = parseFloat(row.average_income || row['平均世帯年収'] || row['世帯年収'] || row.income || 0);
                 
                 return {
@@ -342,10 +356,16 @@
                     household_count: parseInt(row.household_count || row['世帯数'] || 0)
                 };
             }).filter(item => {
-                // 日本の座標範囲内のデータのみ使用
-                return item.latitude >= 24 && item.latitude <= 46 &&
-                       item.longitude >= 122 && item.longitude <= 146 &&
-                       item.average_income > 0;
+                // 日本の座標範囲内のデータのみ使用（より正確な範囲）
+                const isValidCoords = item.latitude >= 20 && item.latitude <= 46 &&
+                                    item.longitude >= 122 && item.longitude <= 154 &&
+                                    item.average_income > 0;
+                
+                if (!isValidCoords && item.latitude !== 0) {
+                    console.log('無効な座標:', item.latitude, item.longitude, item.prefecture_name);
+                }
+                
+                return isValidCoords;
             });
             
             if (allData.length === 0) {
@@ -353,6 +373,15 @@
             }
             
             console.log(`読み込み完了: ${allData.length}件のデータ`);
+            // 収入の分布を確認
+            const incomeRanges = {
+                '0-400': allData.filter(d => d.average_income < 400).length,
+                '400-500': allData.filter(d => d.average_income >= 400 && d.average_income < 500).length,
+                '500-600': allData.filter(d => d.average_income >= 500 && d.average_income < 600).length,
+                '600+': allData.filter(d => d.average_income >= 600).length
+            };
+            console.log('収入分布:', incomeRanges);
+            
             return allData;
             
         } catch (error) {
@@ -367,30 +396,39 @@
             map.removeLayer(heatLayer);
         }
         
-        // ヒートマップ用データの準備（強度を収入に応じて調整）
+        // ヒートマップ用データの準備（収入に応じて強度を設定）
         const heatData = data.map(item => {
-            // 収入を0-1の範囲に正規化
-            const intensity = Math.min(Math.max(item.average_income / 800, 0.3), 1);
+            // 収入に基づいて強度を設定（低収入は低い値、高収入は高い値）
+            let intensity;
+            if (item.average_income < 400) {
+                intensity = 0.2 + (item.average_income / 400) * 0.2; // 0.2-0.4
+            } else if (item.average_income < 500) {
+                intensity = 0.4 + ((item.average_income - 400) / 100) * 0.2; // 0.4-0.6
+            } else if (item.average_income < 600) {
+                intensity = 0.6 + ((item.average_income - 500) / 100) * 0.2; // 0.6-0.8
+            } else {
+                intensity = 0.8 + Math.min((item.average_income - 600) / 200, 0.2); // 0.8-1.0
+            }
             return [item.latitude, item.longitude, intensity];
         });
         
-        // ヒートマップレイヤーの作成（画像のような表示）
+        // ヒートマップレイヤーの作成（青→緑→黄→赤のグラデーション）
         heatLayer = L.heatLayer(heatData, {
-            radius: 20,
+            radius: 25,
             blur: 15,
             maxZoom: 12,
             max: 1.0,
             gradient: {
-                0.0: 'rgba(171, 217, 233, 0)',
-                0.2: 'rgba(171, 217, 233, 0.8)',
-                0.3: 'rgba(224, 243, 248, 0.9)',
-                0.4: 'rgba(255, 255, 191, 1)',
-                0.5: 'rgba(254, 224, 144, 1)',
-                0.6: 'rgba(253, 174, 97, 1)',
-                0.7: 'rgba(244, 109, 67, 1)',
-                0.8: 'rgba(215, 48, 39, 1)',
-                0.9: 'rgba(165, 0, 38, 1)',
-                1.0: 'rgba(128, 0, 38, 1)'
+                0.0: 'rgba(0, 0, 255, 0)',      // 透明青
+                0.2: 'rgba(0, 0, 255, 0.5)',    // 青（低収入）
+                0.3: 'rgba(0, 128, 255, 0.6)',  // 水色
+                0.4: 'rgba(0, 255, 255, 0.7)',  // シアン
+                0.5: 'rgba(0, 255, 0, 0.8)',    // 緑
+                0.6: 'rgba(255, 255, 0, 0.9)',  // 黄色（中収入）
+                0.7: 'rgba(255, 200, 0, 0.9)',  // オレンジ黄
+                0.8: 'rgba(255, 128, 0, 1)',    // オレンジ
+                0.9: 'rgba(255, 0, 0, 1)',      // 赤（高収入）
+                1.0: 'rgba(128, 0, 0, 1)'       // 濃い赤
             }
         }).addTo(map);
     }
@@ -480,13 +518,13 @@
             // ズームレベルに応じてヒートマップの設定を調整
             if (heatLayer) {
                 if (zoom >= 10) {
-                    heatLayer.setOptions({radius: 10, blur: 8});
+                    heatLayer.setOptions({radius: 12, blur: 8});
                 } else if (zoom >= 8) {
-                    heatLayer.setOptions({radius: 15, blur: 10});
-                } else if (zoom >= 6) {
                     heatLayer.setOptions({radius: 18, blur: 12});
+                } else if (zoom >= 6) {
+                    heatLayer.setOptions({radius: 22, blur: 15});
                 } else {
-                    heatLayer.setOptions({radius: 20, blur: 15});
+                    heatLayer.setOptions({radius: 25, blur: 15});
                 }
             }
             
@@ -542,7 +580,7 @@
     // ページ読み込み完了後に実行
     document.addEventListener('DOMContentLoaded', main);
 </script>
-
+```
 
 </body>
 </html>
